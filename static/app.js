@@ -3,13 +3,192 @@ let selectedTickets = new Set();
 let blockedRoutes = [];
 let currentSolutions = null;
 let activeSolutionIndex = 0;
+let calibrationMode = false;
+let calibrationCities = [];
+let calibrationIndex = 0;
+let calibrationData = {};
 
 const SOLUTION_COLORS = ["#00ff88", "#ffaa00", "#00bbff"];
+const NS = "http://www.w3.org/2000/svg";
 
 async function init() {
     const res = await fetch("/api/data");
     gameData = await res.json();
+
+    const img = document.getElementById("map-img");
+    if (img.complete) {
+        onImageReady();
+    } else {
+        img.addEventListener("load", onImageReady);
+    }
+}
+
+function onImageReady() {
+    setupSvgOverlays();
     renderTickets();
+    renderMapRoutes();
+
+    window.addEventListener("resize", () => {
+        setupSvgOverlays();
+        if (!calibrationMode) renderMapRoutes();
+        if (currentSolutions) drawSolutionOnMap(activeSolutionIndex);
+    });
+}
+
+function setupSvgOverlays() {
+    const img = document.getElementById("map-img");
+    const overlay = document.getElementById("map-overlay");
+    const routeOverlay = document.getElementById("route-overlay");
+
+    const vb = `0 0 ${img.naturalWidth} ${img.naturalHeight}`;
+
+    [overlay, routeOverlay].forEach(svg => {
+        svg.setAttribute("viewBox", vb);
+        svg.setAttribute("preserveAspectRatio", "none");
+        svg.style.width = img.clientWidth + "px";
+        svg.style.height = img.clientHeight + "px";
+        svg.style.position = "absolute";
+        svg.style.top = img.offsetTop + "px";
+        svg.style.left = img.offsetLeft + "px";
+    });
+}
+
+// --- Calibration Mode ---
+
+function startCalibration() {
+    calibrationMode = true;
+    calibrationCities = Object.keys(gameData.cities);
+    calibrationIndex = 0;
+    calibrationData = {};
+
+    // Hide normal UI, show calibration UI
+    document.getElementById("ticket-selection").classList.add("hidden");
+    document.getElementById("actions").classList.add("hidden");
+    document.getElementById("results").classList.add("hidden");
+    document.getElementById("blocked-section").classList.add("hidden");
+
+    const calDiv = document.getElementById("calibration-ui");
+    calDiv.classList.remove("hidden");
+
+    // Clear map overlay
+    document.getElementById("map-overlay").innerHTML = "";
+    document.getElementById("route-overlay").innerHTML = "";
+
+    // Set up click handler on overlay
+    const svg = document.getElementById("map-overlay");
+    svg._calHandler = (e) => {
+        if (!calibrationMode) return;
+        const img = document.getElementById("map-img");
+        const rect = img.getBoundingClientRect();
+        const scaleX = img.naturalWidth / rect.width;
+        const scaleY = img.naturalHeight / rect.height;
+        const px = Math.round((e.clientX - rect.left) * scaleX);
+        const py = Math.round((e.clientY - rect.top) * scaleY);
+
+        const cityName = calibrationCities[calibrationIndex];
+        calibrationData[cityName] = { x: px, y: py };
+
+        // Draw dot where clicked
+        const circle = document.createElementNS(NS, "circle");
+        circle.setAttribute("cx", px);
+        circle.setAttribute("cy", py);
+        circle.setAttribute("r", "6");
+        circle.setAttribute("fill", "#00ff88");
+        circle.setAttribute("stroke", "white");
+        circle.setAttribute("stroke-width", "2");
+        svg.appendChild(circle);
+
+        const label = document.createElementNS(NS, "text");
+        label.setAttribute("x", px);
+        label.setAttribute("y", py - 10);
+        label.setAttribute("text-anchor", "middle");
+        label.setAttribute("fill", "#00ff88");
+        label.setAttribute("font-size", "9");
+        label.setAttribute("font-weight", "bold");
+        label.setAttribute("paint-order", "stroke");
+        label.setAttribute("stroke", "rgba(0,0,0,0.8)");
+        label.setAttribute("stroke-width", "3");
+        label.textContent = cityName;
+        svg.appendChild(label);
+
+        calibrationIndex++;
+        updateCalibrationUI();
+    };
+    svg.addEventListener("click", svg._calHandler);
+
+    updateCalibrationUI();
+}
+
+function undoCalibration() {
+    if (calibrationIndex <= 0) return;
+    calibrationIndex--;
+    const cityName = calibrationCities[calibrationIndex];
+    delete calibrationData[cityName];
+
+    // Remove last 2 SVG elements (circle + label)
+    const svg = document.getElementById("map-overlay");
+    if (svg.lastChild) svg.removeChild(svg.lastChild);
+    if (svg.lastChild) svg.removeChild(svg.lastChild);
+
+    updateCalibrationUI();
+}
+
+function updateCalibrationUI() {
+    const calDiv = document.getElementById("calibration-ui");
+    const total = calibrationCities.length;
+
+    if (calibrationIndex >= total) {
+        // Done! Show results
+        let output = "CITIES = {\n";
+        for (const [name, coords] of Object.entries(calibrationData)) {
+            const pad = " ".repeat(20 - name.length - 2);
+            output += `    "${name}":${pad}{"x": ${coords.x},${coords.x < 100 ? "  " : coords.x < 1000 ? " " : ""} "y": ${coords.y}},\n`;
+        }
+        output += "}";
+
+        calDiv.innerHTML = `
+            <h2>Calibracao Completa!</h2>
+            <p>${total} cidades calibradas</p>
+            <textarea id="cal-output" style="width:100%;height:300px;background:#1a1a2e;color:#0f0;border:1px solid #0f3460;font-family:monospace;font-size:11px;padding:8px;">${output}</textarea>
+            <button onclick="copyCalibration()" style="margin-top:8px;padding:8px;background:#00ff88;color:#000;border:none;border-radius:6px;cursor:pointer;width:100%;">Copiar para Clipboard</button>
+            <button onclick="endCalibration()" style="margin-top:8px;padding:8px;background:#e94560;color:#fff;border:none;border-radius:6px;cursor:pointer;width:100%;">Voltar</button>
+        `;
+        return;
+    }
+
+    const cityName = calibrationCities[calibrationIndex];
+    calDiv.innerHTML = `
+        <h2>Calibracao</h2>
+        <p style="font-size:0.85rem;color:#a8b2d1;">Clique na cidade no mapa:</p>
+        <div style="font-size:1.5rem;color:#00ff88;font-weight:bold;text-align:center;padding:12px 0;">${cityName}</div>
+        <p style="font-size:0.8rem;color:#666;">${calibrationIndex + 1} / ${total}</p>
+        <div style="background:#1a1a2e;border-radius:4px;height:6px;margin:8px 0;">
+            <div style="background:#00ff88;height:100%;border-radius:4px;width:${(calibrationIndex / total * 100)}%;"></div>
+        </div>
+        <button onclick="undoCalibration()" style="padding:6px 12px;background:#0f3460;color:#a8b2d1;border:none;border-radius:6px;cursor:pointer;margin-top:4px;"${calibrationIndex === 0 ? " disabled" : ""}>Desfazer ultimo</button>
+        <button onclick="endCalibration()" style="padding:6px 12px;background:#e94560;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-top:4px;float:right;">Cancelar</button>
+    `;
+}
+
+function copyCalibration() {
+    const textarea = document.getElementById("cal-output");
+    textarea.select();
+    navigator.clipboard.writeText(textarea.value);
+}
+
+function endCalibration() {
+    calibrationMode = false;
+    const svg = document.getElementById("map-overlay");
+    if (svg._calHandler) {
+        svg.removeEventListener("click", svg._calHandler);
+        svg._calHandler = null;
+    }
+
+    document.getElementById("calibration-ui").classList.add("hidden");
+    document.getElementById("ticket-selection").classList.remove("hidden");
+    document.getElementById("actions").classList.remove("hidden");
+    document.getElementById("blocked-section").classList.remove("hidden");
+
     renderMapRoutes();
 }
 
@@ -81,13 +260,13 @@ function renderMapRoutes() {
         const to = gameData.cities[route.to];
         if (!from || !to) return;
 
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        const line = document.createElementNS(NS, "line");
         line.setAttribute("x1", from.x);
         line.setAttribute("y1", from.y);
         line.setAttribute("x2", to.x);
         line.setAttribute("y2", to.y);
         line.setAttribute("stroke", "transparent");
-        line.setAttribute("stroke-width", "1.2");
+        line.setAttribute("stroke-width", "14");
         line.classList.add("route-line");
         line.dataset.routeIndex = route.index;
         line.dataset.from = route.from;
@@ -101,23 +280,30 @@ function renderMapRoutes() {
         svg.appendChild(line);
     });
 
-    // Draw city dots
+    // Draw city dots and labels
     Object.entries(gameData.cities).forEach(([name, coords]) => {
-        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        const g = document.createElementNS(NS, "g");
+
+        const circle = document.createElementNS(NS, "circle");
         circle.setAttribute("cx", coords.x);
         circle.setAttribute("cy", coords.y);
-        circle.setAttribute("r", "0.7");
+        circle.setAttribute("r", "8");
         circle.setAttribute("fill", "#0f3460");
         circle.setAttribute("stroke", "#a8b2d1");
-        circle.setAttribute("stroke-width", "0.15");
+        circle.setAttribute("stroke-width", "2");
         circle.classList.add("city-dot");
         circle.dataset.city = name;
+        g.appendChild(circle);
 
-        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-        title.textContent = name;
-        circle.appendChild(title);
+        const label = document.createElementNS(NS, "text");
+        label.setAttribute("x", coords.x);
+        label.setAttribute("y", coords.y - 12);
+        label.setAttribute("text-anchor", "middle");
+        label.classList.add("city-label");
+        label.textContent = name;
+        g.appendChild(label);
 
-        svg.appendChild(circle);
+        svg.appendChild(g);
     });
 }
 
@@ -276,26 +462,26 @@ function drawSolutionOnMap(index) {
         if (!from || !to) return;
 
         // Glow effect
-        const glow = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        const glow = document.createElementNS(NS, "line");
         glow.setAttribute("x1", from.x);
         glow.setAttribute("y1", from.y);
         glow.setAttribute("x2", to.x);
         glow.setAttribute("y2", to.y);
         glow.setAttribute("stroke", color);
-        glow.setAttribute("stroke-width", "1.5");
+        glow.setAttribute("stroke-width", "18");
         glow.setAttribute("stroke-opacity", "0.3");
         glow.setAttribute("stroke-linecap", "round");
         glow.classList.add("solution-edge");
         svg.appendChild(glow);
 
         // Main line
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        const line = document.createElementNS(NS, "line");
         line.setAttribute("x1", from.x);
         line.setAttribute("y1", from.y);
         line.setAttribute("x2", to.x);
         line.setAttribute("y2", to.y);
         line.setAttribute("stroke", color);
-        line.setAttribute("stroke-width", "0.7");
+        line.setAttribute("stroke-width", "6");
         line.setAttribute("stroke-linecap", "round");
         line.classList.add("solution-edge");
         svg.appendChild(line);
@@ -306,14 +492,14 @@ function drawSolutionOnMap(index) {
         const coords = gameData.cities[city];
         if (!coords) return;
 
-        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        const circle = document.createElementNS(NS, "circle");
         circle.setAttribute("cx", coords.x);
         circle.setAttribute("cy", coords.y);
-        circle.setAttribute("r", "1.2");
+        circle.setAttribute("r", "14");
         circle.setAttribute("fill", color);
         circle.setAttribute("fill-opacity", "0.8");
         circle.setAttribute("stroke", "white");
-        circle.setAttribute("stroke-width", "0.25");
+        circle.setAttribute("stroke-width", "3");
         svg.appendChild(circle);
     });
 }
