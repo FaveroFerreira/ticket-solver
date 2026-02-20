@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket to Ride Europe - Solver</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app">
+        <aside id="sidebar">
+            <h1>🚂 TTR Solver</h1>
+
+            <section id="ticket-selection">
+                <h2>Rota Longa</h2>
+                <div id="long-tickets" class="ticket-list"></div>
+
+                <h2>Rotas Curtas</h2>
+                <div id="short-tickets" class="ticket-list"></div>
+            </section>
+
+            <div id="actions">
+                <button id="solve-btn" onclick="solvePuzzle()">Resolver</button>
+                <button id="clear-btn" onclick="clearAll()">Limpar</button>
+            </div>
+
+            <section id="results" class="hidden">
+                <h2>Resultados</h2>
+                <div id="solution-tabs"></div>
+                <div id="solution-details"></div>
+            </section>
+
+            <section id="blocked-section">
+                <h2>Rotas Bloqueadas</h2>
+                <p class="hint">Clique em rotas no mapa para bloquear/desbloquear</p>
+                <div id="blocked-list"></div>
+            </section>
+        </aside>
+
+        <main id="map-container">
+            <div id="map-wrapper">
+                <img id="map-img" src="/static/map.webp" alt="Ticket to Ride Europe Map">
+                <svg id="map-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+                <svg id="route-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
